@@ -92,7 +92,15 @@ disable_factory_desktop() {
         if [ -e /etc/init.d/S49weston ]; then
             chmod +x /etc/init.d/S49weston >> "$LOG" 2>&1 || true
         fi
-        if ! pgrep -f weston >/dev/null 2>&1 && [ -x /etc/init.d/S49weston ]; then
+        if [ "${BRIDGE_RESTART_WESTON:-1}" = "1" ] && [ -x /etc/init.d/S49weston ]; then
+            log "restart weston for clean qml display"
+            /etc/init.d/S49weston stop >> "$LOG" 2>&1 || true
+            killall weston >> "$LOG" 2>&1 || true
+            pkill -f weston >> "$LOG" 2>&1 || true
+            rm -f /run/user/0/wayland-* /run/wayland-* /var/run/wayland-* 2>/dev/null || true
+            sleep "${BRIDGE_WESTON_RESTART_DELAY:-2}"
+            /etc/init.d/S49weston start >> "$LOG" 2>&1 || true
+        elif ! pgrep -f weston >/dev/null 2>&1 && [ -x /etc/init.d/S49weston ]; then
             /etc/init.d/S49weston start >> "$LOG" 2>&1 || true
         fi
     fi
@@ -147,7 +155,7 @@ supervise() {
         CHILD=""
         log "$NAME exited rc=$RC, restart in 2s"
         FAILS=$((FAILS + 1))
-        if [ "$NAME" = "bridge_ui" ] && [ "${BRIDGE_UI_MAX_FAILS:-5}" -gt 0 ] && [ "$FAILS" -ge "${BRIDGE_UI_MAX_FAILS:-5}" ]; then
+        if [ "$NAME" = "bridge_ui" ] && [ "${BRIDGE_UI_MAX_FAILS:-0}" -gt 0 ] && [ "$FAILS" -ge "${BRIDGE_UI_MAX_FAILS:-0}" ]; then
             log "bridge_ui failed $FAILS times, stop UI supervisor"
             exit 1
         fi
@@ -201,7 +209,7 @@ EOF
         . "$UI_CONFIG"
     fi
     BRIDGE_UI_MODE="${BRIDGE_UI_MODE:-auto}"
-    export SCANNER_DEV PROJECT_INPUT_DEV BRIDGE_UI_MODE BRIDGE_UI_QML_PLATFORM BRIDGE_UI_NO_FALLBACK BRIDGE_UI_START_DELAY BRIDGE_DISABLE_FACTORY_DESKTOP BRIDGE_DISABLE_WESTON BRIDGE_UI_WAYLAND_WAIT
+    export SCANNER_DEV PROJECT_INPUT_DEV BRIDGE_UI_MODE BRIDGE_UI_QML_PLATFORM BRIDGE_UI_NO_FALLBACK BRIDGE_UI_START_DELAY BRIDGE_DISABLE_FACTORY_DESKTOP BRIDGE_DISABLE_WESTON BRIDGE_RESTART_WESTON BRIDGE_WESTON_RESTART_DELAY BRIDGE_UI_WAYLAND_WAIT
 
     disable_factory_desktop
 

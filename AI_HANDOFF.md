@@ -163,7 +163,9 @@ BRIDGE_UI_NO_FALLBACK=1
 BRIDGE_UI_START_DELAY=8
 BRIDGE_DISABLE_FACTORY_DESKTOP=1
 BRIDGE_DISABLE_WESTON=0
-BRIDGE_UI_MAX_FAILS=5
+BRIDGE_RESTART_WESTON=1
+BRIDGE_WESTON_RESTART_DELAY=2
+BRIDGE_UI_MAX_FAILS=0
 BRIDGE_UI_WAYLAND_WAIT=30
 SCANNER_DEV=/dev/input/event8
 PROJECT_INPUT_DEV=/dev/input/event5
@@ -672,6 +674,7 @@ Current recommended behavior:
 - `usb_bridge_ui.qml` uses a full-screen black Wayland window, but keeps the actual UI panel fixed at 480x320 and centered. This hides Weston desktop residue on HDMI while matching the future 480x320 panel.
 - `bridge_ui_qml` waits for a Wayland socket at startup and starts `S49weston` if needed. It auto-detects sockets under `/run/user/0`, `/run`, and `/var/run`. Default wait: `BRIDGE_UI_WAYLAND_WAIT=30`.
 - `bridge_ui_qml` sets `QML_XHR_ALLOW_FILE_READ=1` and uses Qt Quick software rendering by default on Wayland to avoid local-file warnings and Mali buffer-sharing failures.
+- `S98usbbridge` restarts Weston by default before launching the UI (`BRIDGE_RESTART_WESTON=1`) because the board can leave Weston in a bad state after cold boot.
 - Set `BRIDGE_DISABLE_WESTON=1` only when deliberately testing non-Wayland UI backends.
 
 After this, the custom QML UI could own the display.
@@ -686,7 +689,7 @@ Current code behavior:
 
 - `S98usbbridge start` now disables the factory desktop automatically by default.
 - `install_to_board.sh` also stops and removes execute permission from `/etc/init.d/S49weston` and `/etc/init.d/S50systemui`.
-- `S98usbbridge` stops the UI supervisor after repeated QML crashes instead of restarting forever. Default limit: `BRIDGE_UI_MAX_FAILS=5`.
+- `S98usbbridge` keeps the UI supervisor retrying by default (`BRIDGE_UI_MAX_FAILS=0`) so the display can recover after slow cold boot. Set a positive value only when debugging crash loops.
 - To skip this behavior for debugging, set this in `/root/usb_bridge/config/ui.conf` before starting `S98usbbridge`:
 
 ```conf

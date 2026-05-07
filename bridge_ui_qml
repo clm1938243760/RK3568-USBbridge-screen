@@ -60,6 +60,8 @@ case "$PLATFORM" in
         echo "[$(date '+%F %T')] wayland ready: XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR WAYLAND_DISPLAY=$WAYLAND_DISPLAY" >> "$LOG"
         export QT_WAYLAND_DISABLE_WINDOWDECORATION="${QT_WAYLAND_DISABLE_WINDOWDECORATION:-1}"
         export QT_QUICK_BACKEND="${QT_QUICK_BACKEND:-software}"
+        export QT_OPENGL="${QT_OPENGL:-software}"
+        export LIBGL_ALWAYS_SOFTWARE="${LIBGL_ALWAYS_SOFTWARE:-1}"
         export QML_XHR_ALLOW_FILE_READ="${QML_XHR_ALLOW_FILE_READ:-1}"
         ;;
     linuxfb*)
