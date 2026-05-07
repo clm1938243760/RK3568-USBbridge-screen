@@ -164,6 +164,7 @@ BRIDGE_UI_START_DELAY=8
 BRIDGE_DISABLE_FACTORY_DESKTOP=1
 BRIDGE_DISABLE_WESTON=0
 BRIDGE_UI_MAX_FAILS=5
+BRIDGE_UI_WAYLAND_WAIT=30
 SCANNER_DEV=/dev/input/event8
 PROJECT_INPUT_DEV=/dev/input/event5
 ```
@@ -669,6 +670,7 @@ Current recommended behavior:
 - Run the custom QML UI with `BRIDGE_UI_QML_PLATFORM=wayland`.
 - `usb_bridge_ui.qml` is a frameless `Window` and `bridge_ui_qml` sets `QT_WAYLAND_DISABLE_WINDOWDECORATION=1` to avoid visible desktop window frames.
 - `usb_bridge_ui.qml` uses a full-screen black Wayland window, but keeps the actual UI panel fixed at 480x320 and centered. This hides Weston desktop residue on HDMI while matching the future 480x320 panel.
+- `bridge_ui_qml` waits for the Wayland socket at startup and starts `S49weston` if needed. Default wait: `BRIDGE_UI_WAYLAND_WAIT=30`.
 - Set `BRIDGE_DISABLE_WESTON=1` only when deliberately testing non-Wayland UI backends.
 
 After this, the custom QML UI could own the display.

@@ -23,6 +23,31 @@ fi
 
 case "$PLATFORM" in
     wayland*)
+        export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/0}"
+        export WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-wayland-0}"
+        mkdir -p "$XDG_RUNTIME_DIR"
+        chmod 700 "$XDG_RUNTIME_DIR" 2>/dev/null || true
+
+        I=0
+        WAYLAND_SOCK="$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY"
+        while [ "$I" -lt "${BRIDGE_UI_WAYLAND_WAIT:-30}" ]; do
+            if [ -S "$WAYLAND_SOCK" ]; then
+                break
+            fi
+            if [ "$I" -eq 0 ] && [ -x /etc/init.d/S49weston ] && ! pgrep -f weston >/dev/null 2>&1; then
+                echo "[$(date '+%F %T')] starting weston for wayland display" >> "$LOG"
+                /etc/init.d/S49weston start >> "$LOG" 2>&1 || true
+            fi
+            echo "[$(date '+%F %T')] waiting for wayland: $WAYLAND_SOCK" >> "$LOG"
+            I=$((I + 1))
+            sleep 1
+        done
+
+        if [ ! -S "$WAYLAND_SOCK" ]; then
+            echo "[$(date '+%F %T')] ERROR wayland socket not ready: $WAYLAND_SOCK" >> "$LOG"
+            exit 1
+        fi
+
         export QT_WAYLAND_DISABLE_WINDOWDECORATION="${QT_WAYLAND_DISABLE_WINDOWDECORATION:-1}"
         ;;
     linuxfb*)
