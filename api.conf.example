@@ -1,0 +1,20 @@
+# Copy to /root/usb_bridge/config/api.conf on the RK3568 device.
+# Environment variables with the same names still override this file.
+
+PATIENT_QUERY_URL=http://192.168.112.139:9061/api/client/getTJPatientInfo
+PATIENT_API_TIMEOUT=10
+
+REPORT_UPLOAD_URL=http://8.148.73.190:5000/upload
+REPORT_UPLOAD_FIELD_NAME=file
+REPORT_UPLOAD_TIMEOUT=30
+
+# GPIO/input key codes for project selection.
+# The selector opens PROJECT_INPUT_DEV first, then also listens to other /dev/input/event*
+# devices, so an external USB keyboard can use arrow keys and Enter too.
+# Defaults: KEY_LEFT=105, KEY_RIGHT=106, KEY_ENTER=28.
+# External keyboard arrows are also accepted: KEY_UP=103, KEY_DOWN=108.
+# Use `evtest` or scan_patient_capture.log to confirm your board's GPIO key codes.
+PROJECT_INPUT_DEV=/dev/input/event5
+PROJECT_KEY_PREV=105
+PROJECT_KEY_NEXT=106
+PROJECT_KEY_CONFIRM=28

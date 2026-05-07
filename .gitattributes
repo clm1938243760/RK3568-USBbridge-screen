@@ -1,0 +1,9 @@
+* text=auto
+*.c text eol=lf
+*.h text eol=lf
+*.qml text eol=lf
+*.sh text eol=lf
+Makefile text eol=lf
+S50usbdevice text eol=lf
+S98usbbridge text eol=lf
+bridge_ui_qml text eol=lf

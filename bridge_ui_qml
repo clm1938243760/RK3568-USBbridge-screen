@@ -1,0 +1,58 @@
+#!/bin/sh
+
+BASE=/root/usb_bridge
+QML_FILE=${BRIDGE_UI_QML:-$BASE/ui/usb_bridge_ui.qml}
+LOG=$BASE/logs/bridge_ui_qml.log
+
+mkdir -p "$BASE/logs"
+
+FB="${BRIDGE_UI_FB_DEV:-/dev/fb0}"
+PLATFORM="${BRIDGE_UI_QML_PLATFORM:-${QT_QPA_PLATFORM:-auto}}"
+
+if [ "$PLATFORM" = "auto" ]; then
+    if [ -n "$WAYLAND_DISPLAY" ]; then
+        PLATFORM=wayland
+    elif [ -n "$DISPLAY" ]; then
+        PLATFORM=xcb
+    elif [ -e "$FB" ]; then
+        PLATFORM=linuxfb
+    else
+        PLATFORM=minimal
+    fi
+fi
+
+case "$PLATFORM" in
+    wayland*)
+        export QT_WAYLAND_DISABLE_WINDOWDECORATION="${QT_WAYLAND_DISABLE_WINDOWDECORATION:-1}"
+        ;;
+    linuxfb*)
+        I=0
+        while [ "$I" -lt "${BRIDGE_UI_FB_WAIT:-20}" ]; do
+            [ -e "$FB" ] && break
+            echo "[$(date '+%F %T')] waiting for framebuffer: $FB" >> "$LOG"
+            I=$((I + 1))
+            sleep 1
+        done
+        export QT_QUICK_BACKEND="${QT_QUICK_BACKEND:-software}"
+        export QT_OPENGL="${QT_OPENGL:-software}"
+        export QT_QPA_FB_FORCE_FULLSCREEN="${QT_QPA_FB_FORCE_FULLSCREEN:-1}"
+        ;;
+esac
+
+export QT_QPA_PLATFORM="$PLATFORM"
+export QML2_IMPORT_PATH="${QML2_IMPORT_PATH:-/usr/lib/qt/qml:/usr/qml}"
+
+cd "$(dirname "$QML_FILE")" || exit 1
+
+if command -v qmlscene >/dev/null 2>&1; then
+    echo "[$(date '+%F %T')] start qmlscene platform=$PLATFORM file=$QML_FILE" >> "$LOG"
+    exec qmlscene -platform "$QT_QPA_PLATFORM" "$QML_FILE" >> "$LOG" 2>&1
+fi
+
+if command -v qml >/dev/null 2>&1; then
+    echo "[$(date '+%F %T')] start qml platform=$PLATFORM file=$QML_FILE" >> "$LOG"
+    exec qml -platform "$QT_QPA_PLATFORM" "$QML_FILE" >> "$LOG" 2>&1
+fi
+
+echo "No qmlscene/qml command found" >> "$LOG"
+exit 127

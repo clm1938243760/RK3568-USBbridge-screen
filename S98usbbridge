@@ -1,0 +1,257 @@
+#!/bin/sh
+### BEGIN INIT INFO
+# Provides:          usbbridge
+# Required-Start:    $local_fs usbdevice
+# Required-Stop:     $local_fs
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: RK3568 USB bridge workers and status UI
+### END INIT INFO
+
+BASE=/root/usb_bridge
+BIN=$BASE/bin
+LOG=$BASE/logs/boot.log
+UI_CONFIG=$BASE/config/ui.conf
+
+log() {
+    mkdir -p "$BASE/logs"
+    echo "[$(date '+%F %T')] $*" | tee -a "$LOG"
+}
+
+ensure_dirs() {
+    mkdir -p \
+        "$BASE/bin" "$BASE/config" "$BASE/logs" "$BASE/state" \
+        "$BASE/form_queue" "$BASE/form_done" "$BASE/error" "$BASE/api_raw" \
+        "$BASE/report_wait_queue" "$BASE/report_wait_done" \
+        "$BASE/report_print_queue" "$BASE/report_pdf_queue" \
+        "$BASE/report_uploaded" "$BASE/report_error" "$BASE/ui"
+}
+
+wait_dev() {
+    DEV="$1"
+    NAME="$2"
+    I=0
+    while [ "$I" -lt 60 ]; do
+        if [ -e "$DEV" ]; then
+            log "$NAME ready: $DEV"
+            return 0
+        fi
+        log "waiting for $NAME: $DEV"
+        I=$((I + 1))
+        sleep 1
+    done
+    log "ERROR timeout waiting for $NAME: $DEV"
+    return 1
+}
+
+wait_display() {
+    FB="${BRIDGE_UI_FB_DEV:-${BRIDGE_UI_FB:-/dev/fb0}}"
+    I=0
+    while [ "$I" -lt "${BRIDGE_UI_FB_WAIT:-20}" ]; do
+        if [ -e "$FB" ]; then
+            log "display ready: $FB"
+            sleep "${BRIDGE_UI_START_DELAY:-8}"
+            return 0
+        fi
+        log "waiting for display: $FB"
+        I=$((I + 1))
+        sleep 1
+    done
+    log "WARN display not ready, UI will use supervisor retry"
+    return 1
+}
+
+disable_factory_desktop() {
+    if [ "${BRIDGE_DISABLE_FACTORY_DESKTOP:-1}" != "1" ]; then
+        log "factory desktop disable skipped"
+        return 0
+    fi
+
+    log "disable factory systemui"
+    if [ -x /etc/init.d/S50systemui ]; then
+        /etc/init.d/S50systemui stop >> "$LOG" 2>&1 || true
+    fi
+    killall systemui >> "$LOG" 2>&1 || true
+    pkill -f systemui >> "$LOG" 2>&1 || true
+    if [ -e /etc/init.d/S50systemui ]; then
+        chmod -x /etc/init.d/S50systemui >> "$LOG" 2>&1 || true
+    fi
+
+    if [ "${BRIDGE_DISABLE_WESTON:-0}" = "1" ]; then
+        log "disable weston"
+        if [ -x /etc/init.d/S49weston ]; then
+            /etc/init.d/S49weston stop >> "$LOG" 2>&1 || true
+        fi
+        killall weston >> "$LOG" 2>&1 || true
+        pkill -f weston >> "$LOG" 2>&1 || true
+        if [ -e /etc/init.d/S49weston ]; then
+            chmod -x /etc/init.d/S49weston >> "$LOG" 2>&1 || true
+        fi
+    else
+        log "keep weston for qml wayland display"
+        if [ -e /etc/init.d/S49weston ]; then
+            chmod +x /etc/init.d/S49weston >> "$LOG" 2>&1 || true
+        fi
+        if ! pgrep -f weston >/dev/null 2>&1 && [ -x /etc/init.d/S49weston ]; then
+            /etc/init.d/S49weston start >> "$LOG" 2>&1 || true
+        fi
+    fi
+}
+
+stop_all() {
+    log "stop old workers"
+    for PID in /tmp/scan_patient_capture.pid /tmp/hid_executor.pid \
+        /tmp/printer_capture.pid /tmp/report_uploader.pid /tmp/bridge_ui.pid; do
+        if [ -f "$PID" ]; then
+            OLD_PID="$(cat "$PID" 2>/dev/null)"
+            if [ -n "$OLD_PID" ]; then
+                kill "$OLD_PID" 2>/dev/null || true
+            fi
+        fi
+    done
+    sleep 1
+    pkill -f "$BIN/scan_patient_capture" 2>/dev/null || true
+    pkill -f "$BIN/hid_executor" 2>/dev/null || true
+    pkill -f "$BIN/printer_capture" 2>/dev/null || true
+    pkill -f "$BIN/report_uploader" 2>/dev/null || true
+    pkill -f "$BIN/bridge_ui_qml" 2>/dev/null || true
+    pkill -f "$BIN/bridge_ui" 2>/dev/null || true
+    pkill -f "qmlscene.*usb_bridge_ui.qml" 2>/dev/null || true
+    pkill -f "qml.*usb_bridge_ui.qml" 2>/dev/null || true
+    sleep 1
+    pkill -9 -f "$BIN/scan_patient_capture" 2>/dev/null || true
+    pkill -9 -f "$BIN/hid_executor" 2>/dev/null || true
+    pkill -9 -f "$BIN/printer_capture" 2>/dev/null || true
+    pkill -9 -f "$BIN/report_uploader" 2>/dev/null || true
+    pkill -9 -f "$BIN/bridge_ui_qml" 2>/dev/null || true
+    pkill -9 -f "$BIN/bridge_ui" 2>/dev/null || true
+    pkill -9 -f "qmlscene.*usb_bridge_ui.qml" 2>/dev/null || true
+    pkill -9 -f "qml.*usb_bridge_ui.qml" 2>/dev/null || true
+    rm -f /tmp/scan_patient_capture.pid /tmp/hid_executor.pid \
+        /tmp/printer_capture.pid /tmp/report_uploader.pid /tmp/bridge_ui.pid
+}
+
+supervise() {
+    NAME="$1"
+    PROG="$2"
+    OUT="$3"
+    FAILS=0
+    CHILD=""
+    trap 'log "$NAME supervisor stopping"; [ -n "$CHILD" ] && kill "$CHILD" 2>/dev/null || true; exit 0' TERM INT
+    while true; do
+        log "$NAME run: $PROG"
+        "$PROG" >> "$OUT" 2>&1 &
+        CHILD="$!"
+        wait "$CHILD"
+        RC="$?"
+        CHILD=""
+        log "$NAME exited rc=$RC, restart in 2s"
+        FAILS=$((FAILS + 1))
+        if [ "$NAME" = "bridge_ui" ] && [ "${BRIDGE_UI_MAX_FAILS:-5}" -gt 0 ] && [ "$FAILS" -ge "${BRIDGE_UI_MAX_FAILS:-5}" ]; then
+            log "bridge_ui failed $FAILS times, stop UI supervisor"
+            exit 1
+        fi
+        if [ "${BRIDGE_UI_NO_FALLBACK:-0}" != "1" ] && [ "$NAME" = "bridge_ui" ] && [ "$RC" -ne 0 ] && [ "$PROG" = "$BIN/bridge_ui_qml" ] && [ "$FAILS" -ge 3 ]; then
+            if [ -x "$BIN/bridge_ui" ]; then
+                log "bridge_ui_qml failed $FAILS times, fallback to $BIN/bridge_ui"
+                PROG="$BIN/bridge_ui"
+                FAILS=0
+            fi
+        fi
+        sleep 2
+    done
+}
+
+start_worker() {
+    NAME="$1"
+    PROG="$2"
+    OUT="$BASE/logs/${NAME}_stdout.log"
+    PID="/tmp/${NAME}.pid"
+    if [ ! -x "$PROG" ]; then
+        log "ERROR missing executable: $PROG"
+        return 1
+    fi
+    supervise "$NAME" "$PROG" "$OUT" &
+    echo "$!" > "$PID"
+    log "$NAME supervisor pid=$!"
+}
+
+start_all() {
+    ensure_dirs
+    log "S98usbbridge start"
+    stop_all
+
+    cat > "$BASE/state/ui_status.json" <<EOF
+{
+  "time": "$(date '+%F %T')",
+  "phase": "service_start",
+  "title": "Service starting",
+  "message": "Starting USB gadget and bridge workers",
+  "scan_text": "",
+  "patient_id": "",
+  "report_no": ""
+}
+EOF
+
+    PRINTER_DEV="${PRINTER_DEV:-/dev/g_printer0}"
+    PRINT_IDLE_TIMEOUT="${PRINT_IDLE_TIMEOUT:-2.0}"
+    export PRINTER_DEV PRINT_IDLE_TIMEOUT
+
+    if [ -f "$UI_CONFIG" ]; then
+        . "$UI_CONFIG"
+    fi
+    BRIDGE_UI_MODE="${BRIDGE_UI_MODE:-auto}"
+    export SCANNER_DEV PROJECT_INPUT_DEV BRIDGE_UI_MODE BRIDGE_UI_QML_PLATFORM BRIDGE_UI_NO_FALLBACK BRIDGE_UI_START_DELAY BRIDGE_DISABLE_FACTORY_DESKTOP BRIDGE_DISABLE_WESTON
+
+    disable_factory_desktop
+
+    if [ "${BRIDGE_UI_DISABLE:-0}" != "1" ]; then
+        wait_display
+        case "$BRIDGE_UI_MODE" in
+            c|fb|framebuffer)
+                start_worker bridge_ui "$BIN/bridge_ui"
+                ;;
+            qml)
+                start_worker bridge_ui "$BIN/bridge_ui_qml"
+                ;;
+            auto|*)
+                if [ -x "$BIN/bridge_ui_qml" ] && [ -f "$BASE/ui/usb_bridge_ui.qml" ]; then
+                    start_worker bridge_ui "$BIN/bridge_ui_qml"
+                else
+                    start_worker bridge_ui "$BIN/bridge_ui"
+                fi
+                ;;
+        esac
+    fi
+
+    wait_dev /dev/hidg0 "keyboard hid" || return 1
+    wait_dev /dev/hidg1 "mouse hid" || return 1
+    wait_dev "$PRINTER_DEV" "usb printer" || return 1
+
+    rm -f "$BASE/queue/"*.json "$BASE/queue/"*.work 2>/dev/null || true
+
+    start_worker hid_executor "$BIN/hid_executor"
+    sleep 1
+    start_worker scan_patient_capture "$BIN/scan_patient_capture"
+    start_worker printer_capture "$BIN/printer_capture"
+    start_worker report_uploader "$BIN/report_uploader"
+    log "S98usbbridge started"
+}
+
+case "$1" in
+    start)
+        start_all
+        ;;
+    stop)
+        stop_all
+        ;;
+    restart|reload)
+        stop_all
+        sleep 1
+        start_all
+        ;;
+    *)
+        echo "Usage: $0 {start|stop|restart}"
+        exit 1
+        ;;
+esac

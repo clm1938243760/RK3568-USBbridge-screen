@@ -1,0 +1,11 @@
+.check/
+.vscode/
+*.o
+hid_executor
+scan_patient_capture
+printer_capture
+report_uploader
+bridge_ui
+usbdevice
+usbbridge
+sendkey

@@ -1,0 +1,126 @@
+#!/bin/sh
+### BEGIN INIT INFO
+# Provides:          usbdevice
+# Required-Start:    $local_fs
+# Required-Stop:     $local_fs
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: RK3568 USB HID keyboard mouse printer gadget
+### END INIT INFO
+
+G=/sys/kernel/config/usb_gadget/rockchip
+CONFIG=$G/configs/b.1
+LOG=/root/usb_bridge/logs/usbdevice.log
+
+log() {
+    mkdir -p /root/usb_bridge/logs
+    echo "[$(date '+%F %T')] $*" | tee -a "$LOG"
+}
+
+write_text() {
+    echo -n "$2" > "$1"
+}
+
+get_udc() {
+    ls /sys/class/udc 2>/dev/null | head -n 1
+}
+
+unbind_udc() {
+    if [ -e "$G/UDC" ]; then
+        echo "" > "$G/UDC" 2>/dev/null || true
+        sleep 1
+    fi
+}
+
+remove_old() {
+    if [ -d "$CONFIG" ]; then
+        find "$CONFIG" -maxdepth 1 -type l -exec rm -f {} \; 2>/dev/null || true
+    fi
+}
+
+start_gadget() {
+    mkdir -p /root/usb_bridge/logs
+
+    if ! mountpoint -q /sys/kernel/config; then
+        log "mount configfs"
+        mount -t configfs none /sys/kernel/config || return 1
+    fi
+
+    UDC="$(get_udc)"
+    if [ -z "$UDC" ]; then
+        log "ERROR: no UDC found under /sys/class/udc"
+        return 1
+    fi
+
+    log "setup usb gadget, UDC=$UDC"
+    mkdir -p "$G"
+    unbind_udc
+    remove_old
+
+    write_text "$G/idVendor" "0x2207"
+    write_text "$G/idProduct" "0x3568"
+    write_text "$G/bcdUSB" "0x0200"
+    write_text "$G/bcdDevice" "0x0100"
+
+    mkdir -p "$G/strings/0x409"
+    write_text "$G/strings/0x409/serialnumber" "RK3568BRIDGE001"
+    write_text "$G/strings/0x409/manufacturer" "RK3568"
+    write_text "$G/strings/0x409/product" "RK3568 HID Keyboard Mouse Printer Bridge"
+
+    mkdir -p "$CONFIG/strings/0x409"
+    write_text "$CONFIG/strings/0x409/configuration" "HID Keyboard + HID Mouse + USB Printer"
+    write_text "$CONFIG/MaxPower" "120"
+
+    log "setup HID keyboard"
+    mkdir -p "$G/functions/hid.usb0"
+    write_text "$G/functions/hid.usb0/protocol" "1"
+    write_text "$G/functions/hid.usb0/subclass" "1"
+    write_text "$G/functions/hid.usb0/report_length" "8"
+    printf '\x05\x01\x09\x06\xa1\x01\x05\x07\x19\xe0\x29\xe7\x15\x00\x25\x01\x75\x01\x95\x08\x81\x02\x95\x01\x75\x08\x81\x03\x95\x05\x75\x01\x05\x08\x19\x01\x29\x05\x91\x02\x95\x01\x75\x03\x91\x03\x95\x06\x75\x08\x15\x00\x25\x65\x05\x07\x19\x00\x29\x65\x81\x00\xc0' > "$G/functions/hid.usb0/report_desc"
+
+    log "setup HID mouse"
+    mkdir -p "$G/functions/hid.usb1"
+    write_text "$G/functions/hid.usb1/protocol" "2"
+    write_text "$G/functions/hid.usb1/subclass" "1"
+    write_text "$G/functions/hid.usb1/report_length" "5"
+    printf '\x05\x01\x09\x02\xa1\x01\x09\x01\xa1\x00\x05\x09\x19\x01\x29\x03\x15\x00\x25\x01\x95\x03\x75\x01\x81\x02\x95\x01\x75\x05\x81\x03\x05\x01\x09\x30\x09\x31\x16\x00\x00\x26\xff\x7f\x36\x00\x00\x46\xff\x7f\x75\x10\x95\x02\x81\x02\xc0\xc0' > "$G/functions/hid.usb1/report_desc"
+
+    log "setup USB printer"
+    mkdir -p "$G/functions/printer.usb0"
+    write_text "$G/functions/printer.usb0/q_len" "10"
+    write_text "$G/functions/printer.usb0/pnp_string" "MFG:RK3568;MDL:Virtual Printer;CLS:PRINTER;"
+
+    ln -sf "$G/functions/hid.usb0" "$CONFIG/f_keyboard"
+    ln -sf "$G/functions/hid.usb1" "$CONFIG/f_mouse"
+    ln -sf "$G/functions/printer.usb0" "$CONFIG/f_printer"
+
+    log "bind UDC"
+    write_text "$G/UDC" "$UDC"
+    sleep 1
+    mdev -s 2>/dev/null || true
+    write_text /tmp/.usb_config "usb_hid_mouse_printer_en"
+    log "done: expect /dev/hidg0 /dev/hidg1 /dev/g_printer0"
+}
+
+stop_gadget() {
+    log "stop usb gadget"
+    unbind_udc
+}
+
+case "$1" in
+    start)
+        start_gadget
+        ;;
+    stop)
+        stop_gadget
+        ;;
+    restart|reload)
+        stop_gadget
+        sleep 1
+        start_gadget
+        ;;
+    *)
+        echo "Usage: $0 {start|stop|restart}"
+        exit 1
+        ;;
+esac
