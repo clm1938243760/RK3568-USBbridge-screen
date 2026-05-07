@@ -23,14 +23,21 @@ fi
 
 case "$PLATFORM" in
     wayland*)
-        export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/0}"
-        export WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-wayland-0}"
-        mkdir -p "$XDG_RUNTIME_DIR"
-        chmod 700 "$XDG_RUNTIME_DIR" 2>/dev/null || true
-
         I=0
-        WAYLAND_SOCK="$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY"
         while [ "$I" -lt "${BRIDGE_UI_WAYLAND_WAIT:-30}" ]; do
+            WAYLAND_SOCK=""
+            for DIR in "${XDG_RUNTIME_DIR:-}" /run/user/0 /run /var/run; do
+                [ -n "$DIR" ] || continue
+                [ -d "$DIR" ] || continue
+                for SOCK in "$DIR"/wayland-*; do
+                    if [ -S "$SOCK" ]; then
+                        WAYLAND_SOCK="$SOCK"
+                        break
+                    fi
+                done
+                [ -n "$WAYLAND_SOCK" ] && break
+            done
+
             if [ -S "$WAYLAND_SOCK" ]; then
                 break
             fi
@@ -38,17 +45,22 @@ case "$PLATFORM" in
                 echo "[$(date '+%F %T')] starting weston for wayland display" >> "$LOG"
                 /etc/init.d/S49weston start >> "$LOG" 2>&1 || true
             fi
-            echo "[$(date '+%F %T')] waiting for wayland: $WAYLAND_SOCK" >> "$LOG"
+            echo "[$(date '+%F %T')] waiting for wayland socket" >> "$LOG"
             I=$((I + 1))
             sleep 1
         done
 
         if [ ! -S "$WAYLAND_SOCK" ]; then
-            echo "[$(date '+%F %T')] ERROR wayland socket not ready: $WAYLAND_SOCK" >> "$LOG"
+            echo "[$(date '+%F %T')] ERROR wayland socket not ready" >> "$LOG"
             exit 1
         fi
 
+        export XDG_RUNTIME_DIR="$(dirname "$WAYLAND_SOCK")"
+        export WAYLAND_DISPLAY="$(basename "$WAYLAND_SOCK")"
+        echo "[$(date '+%F %T')] wayland ready: XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR WAYLAND_DISPLAY=$WAYLAND_DISPLAY" >> "$LOG"
         export QT_WAYLAND_DISABLE_WINDOWDECORATION="${QT_WAYLAND_DISABLE_WINDOWDECORATION:-1}"
+        export QT_QUICK_BACKEND="${QT_QUICK_BACKEND:-software}"
+        export QML_XHR_ALLOW_FILE_READ="${QML_XHR_ALLOW_FILE_READ:-1}"
         ;;
     linuxfb*)
         I=0
